@@ -10,22 +10,22 @@ from utils import execute_query
 # Define paths for the TSV files
 DATA_DIR = 'data'
 DEFAULT_FILES = {
-    'actors': os.path.join(DATA_DIR, 'name.basics.tsv'),
-    'movies': os.path.join(DATA_DIR, 'title.basics.tsv'),
-    'principals': os.path.join(DATA_DIR, 'title.principals.tsv')
+    'names': os.path.join(DATA_DIR, 'name.basics.tsv'),
+    'titles': os.path.join(DATA_DIR, 'title.basics.tsv'),
+    'principals': os.path.join(DATA_DIR, 'title.principals.tsv'),
 }
 
 @click.command()
-@click.argument('file_type', type=click.Choice(['actors', 'movies', 'principals', 'all']))
+@click.argument('file_type', type=click.Choice(['names', 'titles', 'principals', 'all']))
 @click.option('--threads', default=4, help='Number of threads to use for import')
-@click.option('--percentage', default=2, type=int, help='Percentage of the file to process')
+@click.option('--percentage', default=2, type=float, help='Percentage of the file to process')
 def dump(file_type, threads, percentage):
     """
     Dumps data into database. Use `all` to dump all datasets at once.
     Usage: python3 main.py dump all --threads 4
     """
     # Parameter mappers
-    def person_params(row):
+    def name_params(row):
         return {
             "nconst": row["nconst"],
             "primaryName": row["primaryName"],
@@ -33,7 +33,7 @@ def dump(file_type, threads, percentage):
             "deathYear": row["deathYear"]
         }
 
-    def movie_params(row):
+    def title_params(row):
         return {
             "tconst": row["tconst"],
             "primaryTitle": row["primaryTitle"],
@@ -42,10 +42,9 @@ def dump(file_type, threads, percentage):
             "genres": row["genres"]
         }
 
-    def relationship_params(row):
+    def principal_params(row):
         return {
             "tconst": row["tconst"],
-            "ordering": row["ordering"],
             "nconst": row["nconst"],
             "category": row["category"],
             "job": row["job"],
@@ -61,23 +60,23 @@ def dump(file_type, threads, percentage):
             click.echo(f"{row_count} rows of a total of {total_rows} will be dumped.")
             return reader[:row_count]
        
-    def import_actors():
-            click.echo("Loading Actors into memory...")
-            name_data = load_data(DEFAULT_FILES['actors'])
-            click.echo("Dumping Actors into database...")
-            execute_in_batches(name_data, INSERT_ACTOR_QUERY, person_params, len(name_data))
+    def import_names():
+            click.echo("Loading Names into memory...")
+            name_data = load_data(DEFAULT_FILES['names'])
+            click.echo("Dumping Names into database...")
+            execute_in_batches(name_data, INSERT_NAME_QUERY, name_params, len(name_data))
 
-    def import_movies():
-            click.echo("Loading movies into memory...")
-            title_data = load_data(DEFAULT_FILES['movies'])
-            click.echo("Dumping Movies into database...")
-            execute_in_batches(title_data, INSERT_MOVIE_QUERY, movie_params, len(title_data))
+    def import_titles():
+            click.echo("Loading Titles into memory...")
+            title_data = load_data(DEFAULT_FILES['titles'])
+            click.echo("Dumping Titles into database...")
+            execute_in_batches(title_data, INSERT_TITLE_QUERY, title_params, len(title_data))
 
-    def create_relation_actors_movies():
-            click.echo("Loading principals into memory...")
+    def import_principals():
+            click.echo("Loading Principals into memory...")
             principals_data = load_data(DEFAULT_FILES['principals'])
-            click.echo("Dumping principals into database...")
-            execute_in_batches(principals_data, RELATION_ACTOR_MOVIE_QUERY, relationship_params, len(principals_data))
+            click.echo("Dumping Principals into database...")
+            execute_in_batches(principals_data, INSERT_PRINCIPALS_QUERY, principal_params, len(principals_data))
 
     # Insert batch function
     def insert_batch(data, query, params_mapper, progress_bar):
@@ -97,17 +96,17 @@ def dump(file_type, threads, percentage):
     if file_type == 'all':
         click.echo("Dumping all data...")
 
-        import_actors()
-        import_movies()
-        create_relation_actors_movies()
+        import_names()
+        import_titles()
+        import_principals()
 
-    elif file_type == 'actors':
-        import_actors()
+    elif file_type == 'names':
+        import_names()
 
-    elif file_type == 'movies':
-        import_movies()
+    elif file_type == 'titles':
+        import_titles()
 
     elif file_type == 'principals':
-        create_relation_actors_movies()
+        import_principals()
 
     click.echo("Finished.")

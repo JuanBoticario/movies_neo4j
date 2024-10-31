@@ -1,7 +1,7 @@
 DELETE_DB_QUERY = "MATCH (n) DETACH DELETE n"
 
-INSERT_ACTOR_QUERY = """
-    CREATE (p:Person { 
+INSERT_NAME_QUERY = """
+    CREATE (n: Name{ 
         id: $nconst, 
         name: $primaryName, 
         birth_year: toInteger($birthYear), 
@@ -9,8 +9,8 @@ INSERT_ACTOR_QUERY = """
     });
     """
 
-INSERT_MOVIE_QUERY = """
-    CREATE (m:Movie { 
+INSERT_TITLE_QUERY = """
+    CREATE (t:Title { 
         id: $tconst, 
         title: $primaryTitle, 
         start_year: toInteger($startYear), 
@@ -19,8 +19,8 @@ INSERT_MOVIE_QUERY = """
     });
     """
 
-RELATION_ACTOR_MOVIE_QUERY = """
-    MATCH (p:Person {id: $nconst}), (m:Movie {id: $tconst})
-    CREATE (p)-[:ACTED_IN {category: $category, job: $job, characters: split($characters, ',')}]->(m);
+INSERT_PRINCIPALS_QUERY = """
+    MATCH (n:Name {id: $nconst}), (t:Title {id: $tconst})
+    CREATE (n)-[:ACTED_IN]->(t);
     """
 
