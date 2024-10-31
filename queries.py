@@ -24,3 +24,10 @@ INSERT_PRINCIPALS_QUERY = """
     CREATE (n)-[:ACTED_IN]->(t);
     """
 
+INDEX_NAME_ID = """
+    CREATE INDEX idx_name_id FOR (n:Name) ON (n.id)
+    """
+
+INDEX_TITLE_ID = """
+    CREATE INDEX idx_title_id FOR (t:Title) ON (t.id)
+    """

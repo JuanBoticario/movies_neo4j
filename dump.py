@@ -6,20 +6,20 @@ from queries import *
 from concurrent.futures import ThreadPoolExecutor
 from utils import execute_query
 
-
 # Define paths for the TSV files
 DATA_DIR = 'data'
 DEFAULT_FILES = {
     'names': os.path.join(DATA_DIR, 'name.basics.tsv'),
     'titles': os.path.join(DATA_DIR, 'title.basics.tsv'),
-    'principals': os.path.join(DATA_DIR, 'title.principals.tsv'),
+    'principals': os.path.join(DATA_DIR, 'title.principals.1.tsv'),
 }
 
 @click.command()
 @click.argument('file_type', type=click.Choice(['names', 'titles', 'principals', 'all']))
 @click.option('--threads', default=4, help='Number of threads to use for import')
 @click.option('--percentage', default=2, type=float, help='Percentage of the file to process')
-def dump(file_type, threads, percentage):
+@click.option('--indexed', default=True, type=bool, help='Whether to index names and title ids or not')
+def dump(file_type, threads, percentage, indexed):
     """
     Dumps data into database. Use `all` to dump all datasets at once.
     Usage: python3 main.py dump all --threads 4
@@ -75,7 +75,12 @@ def dump(file_type, threads, percentage):
     def import_principals():
             click.echo("Loading Principals into memory...")
             principals_data = load_data(DEFAULT_FILES['principals'])
+            
             click.echo("Dumping Principals into database...")
+            if indexed:
+                click.echo("Creating indexes...")
+                execute_query(INDEX_NAME_ID)
+                execute_query(INDEX_TITLE_ID)
             execute_in_batches(principals_data, INSERT_PRINCIPALS_QUERY, principal_params, len(principals_data))
 
     # Insert batch function
