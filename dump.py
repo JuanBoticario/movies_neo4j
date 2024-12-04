@@ -1,30 +1,19 @@
 import click
 import csv
-import os
 from tqdm import tqdm
 from queries import *
 from concurrent.futures import ThreadPoolExecutor
-from utils import execute_query
-
-# Define paths for the TSV files
-DATA_DIR = 'data'
-DEFAULT_FILES = {
-    'names': os.path.join(DATA_DIR, 'name.basics.tsv'),
-    'titles': os.path.join(DATA_DIR, 'title.basics.tsv'),
-    'principals': os.path.join(DATA_DIR, 'title.principals.1.tsv'),
-}
+from utils import execute_query, get_unique_genres
 
 @click.command()
-@click.argument('file_type', type=click.Choice(['names', 'titles', 'principals', 'all']))
 @click.option('--threads', default=4, help='Number of threads to use for import')
 @click.option('--percentage', default=2, type=float, help='Percentage of the file to process')
-@click.option('--indexed', default=True, type=bool, help='Whether to index names and title ids or not')
-def dump(file_type, threads, percentage, indexed):
+def dump(threads, percentage):
     """
-    Dumps data into database. Use `all` to dump all datasets at once.
-    Usage: python3 main.py dump all --threads 4
+    Dumps data into database.
+    Usage: python3 main.py dump --threads 4 --percentage 2
     """
-    # Parameter mappers
+
     def name_params(row):
         return {
             "nconst": row["nconst"],
@@ -38,80 +27,160 @@ def dump(file_type, threads, percentage, indexed):
             "tconst": row["tconst"],
             "primaryTitle": row["primaryTitle"],
             "startYear": row["startYear"],
-            "endYear": row["endYear"],
-            "genres": row["genres"]
+            "endYear": row["endYear"]
         }
 
-    def principal_params(row):
+    def acted_in_params(row):
         return {
-            "tconst": row["tconst"],
-            "nconst": row["nconst"],
-            "category": row["category"],
-            "job": row["job"],
-            "characters": row["characters"]
+            "nconst": row['nconst'],
+            "tconst": row['tconst']
+        }     
+
+     
+    def season_params(row):
+        return {
+            "seasonId": row['seasonId'],
+            "seasonNumber": row['seasonNumber']
         }
 
-    # Load data function
-    def load_data(file_path, delimiter='\t'):
+    def season_to_title_params(row):
+        return {
+            "seasonId": row['seasonId'],
+            "parentTconst": row['parentTconst']
+        }
+
+    def episode_to_season_params(row):
+        return {
+            "seasonId": row['seasonId'],
+            "tconst": row['tconst']
+        }
+
+
+    def episode_params(row):
+        return {
+            "tconst": row['tconst'],
+            "episodeNumber": row.get('episodeNumber')
+        }
+
+    def get_names_and_titles():
+
+        file_path = "data/name.basics.tsv"
+        names = []
+        titles_set = set()  
+        acted_in_relation = []
+
+        click.echo("Loading Names and Titles into memory...")
         with open(file_path, 'r', encoding='utf-8') as file:
-            reader = list(csv.DictReader(file, delimiter=delimiter))
-            total_rows = len(reader)
-            row_count = int(total_rows * percentage/100)
-            click.echo(f"{row_count} rows of a total of {total_rows} will be dumped.")
-            return reader[:row_count]
-       
-    def import_names():
-            click.echo("Loading Names into memory...")
-            name_data = load_data(DEFAULT_FILES['names'])
-            click.echo("Dumping Names into database...")
-            execute_in_batches(name_data, INSERT_NAME_QUERY, name_params, len(name_data))
+            reader = list(csv.DictReader(file, delimiter='\t'))
+            for i, row in enumerate(reader):
 
-    def import_titles():
-            click.echo("Loading Titles into memory...")
-            title_data = load_data(DEFAULT_FILES['titles'])
-            click.echo("Dumping Titles into database...")
-            execute_in_batches(title_data, INSERT_TITLE_QUERY, title_params, len(title_data))
+                if i >= percentage/100*len(reader):  # Stop after the first 1000 names
+                    break
 
-    def import_principals():
-            click.echo("Loading Principals into memory...")
-            principals_data = load_data(DEFAULT_FILES['principals'])
-            
-            click.echo("Dumping Principals into database...")
-            if indexed:
-                click.echo("Creating indexes...")
-                execute_query(INDEX_NAME_ID)
-                execute_query(INDEX_TITLE_ID)
-            execute_in_batches(principals_data, INSERT_PRINCIPALS_QUERY, principal_params, len(principals_data))
+                kft = row.get('knownForTitles', '')
+                nconst = row.get('nconst')
 
-    # Insert batch function
-    def insert_batch(data, query, params_mapper, progress_bar):
+                names.append(name_params(row))
+
+                if kft:
+                    for tconst in kft.split(','):
+                        titles_set.add(tconst)
+                        acted_in_relation.append({'nconst': nconst, 'tconst': tconst})
+
+        return names, titles_set, acted_in_relation
+
+    def load_episodes(titles_set):
+
+        file_path = "data/title.episode.tsv"
+
+        episodes = []
+
+        with open(file_path, 'r', encoding='utf-8') as file:
+            reader = csv.DictReader(file, delimiter='\t')
+
+            for row in reader:
+                if row['parentTconst'] in titles_set:
+                    season_id = f"{row['parentTconst']}_S{row['seasonNumber']}"
+                    episodes.append({
+                                    "tconst": row['tconst'],
+                                    "parentTconst": row['parentTconst'],
+                                    "seasonNumber": row.get('seasonNumber', '\\N'),
+                                    "episodeNumber": row.get('episodeNumber', '\\N'),
+                                    "seasonId": season_id
+                })
+
+        return episodes
+
+    def filter_titles_by_ids(titles_set):
+        file_path = "data/title.basics.tsv"
+        filtered_titles = []
+
+        with open(file_path, 'r', encoding='utf-8') as file:
+            reader = csv.DictReader(file, delimiter='\t')
+            for row in reader:
+                if row['tconst'] in titles_set:
+                    filtered_titles.append(row)
+
+        return filtered_titles
+
+    genre_name_to_id = {}
+
+    def import_genres(genres):
+        click.echo("Dumping Genres into database...")
+        for i, genre in enumerate(genres):
+            execute_query(INSERT_GENRE_QUERY, {"gconst": i,
+                          "name": genre})
+            genre_name_to_id[genre] = i 
+
+    def insert_batch(data, query, params_mapper, progress_bar, dump_title_genres):
         for row in data:
             execute_query(query, params_mapper(row))
+            if dump_title_genres:
+                genres = row.get('genres').split(',')
+                for genre in genres:
+                    genre_id = genre_name_to_id.get(genre)
+                    execute_query(INSERT_TITLE_GENRES_QUERY, {"tconst": row.get('tconst'),
+                                                              "gconst": genre_id})
+
             progress_bar.update(1)
 
-    # Multithreading function
-    def execute_in_batches(data, query, params_mapper, total):
+    def execute_in_batches(data, query, params_mapper, total, dump_title_genres=False):
         batch_size = 1000
         with tqdm(total=total, desc="Progress", unit="records") as progress_bar:
             batches = [data[i:i + batch_size] for i in range(0, len(data), batch_size)]
             with ThreadPoolExecutor(max_workers=threads) as executor:
                 for batch in batches:
-                    executor.submit(insert_batch, batch, query, params_mapper, progress_bar)
+                    executor.submit(insert_batch, batch, query, params_mapper, progress_bar, dump_title_genres)
 
-    if file_type == 'all':
-        click.echo("Dumping all data...")
+    names, titles_set, acted_in_relation = get_names_and_titles()
 
-        import_names()
-        import_titles()
-        import_principals()
+    titles = filter_titles_by_ids(titles_set)
 
-    elif file_type == 'names':
-        import_names()
+    episodes = load_episodes(titles_set)
 
-    elif file_type == 'titles':
-        import_titles()
+    click.echo("Dumping Names into database...")
+    execute_in_batches(names, CREATE_NAME_QUERY, name_params, len(names))
 
-    elif file_type == 'principals':
-        import_principals()
+    unique_genres = get_unique_genres(titles)
+    import_genres(unique_genres)
+
+    click.echo("Dumping Titles into database...")
+    execute_in_batches(titles, INSERT_TITLE_QUERY, title_params, len(titles), dump_title_genres=True)
+
+    click.echo("Creating Season nodes...")
+    seasons = list({e['seasonId']: e for e in episodes}.values())
+    execute_in_batches(seasons, CREATE_SEASON_QUERY, season_params, len(seasons))
+
+    click.echo("Linking Seasons to Titles...")
+    execute_in_batches(seasons, LINK_SEASON_TO_TITLE_QUERY, season_to_title_params, len(seasons))
+
+    click.echo("Creating Episode nodes...")
+    execute_in_batches(episodes, CREATE_EPISODE_QUERY, episode_params, len(episodes))
+
+    click.echo("Linking Episodes to Seasons...")
+    execute_in_batches(episodes, LINK_EPISODE_TO_SEASON_QUERY, episode_to_season_params, len(episodes))
+
+    click.echo("Linking Names to Titles...")
+    execute_in_batches(acted_in_relation, INSERT_ACTED_IN_QUERY, acted_in_params, len(acted_in_relation))
 
     click.echo("Finished.")
