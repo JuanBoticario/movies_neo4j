@@ -89,11 +89,6 @@ INSERT_TITLE_EPISODES_QUERY = """
     MATCH(e: Episode {id: $tconst}), (t: Title {id: $ttconst})
     MERGE (e)-[:BELONGS_TO]->(t);
     """
-
-DEMO_GET_NAMES = """
-    MATCH(n: Name) RETURN n.id, n.name LIMIT 10;
-"""
-
 DEMO_DIRECTED_INSERT = """
     MATCH(n: Name {name: $primaryName}), (t:Title {title: $primaryTitle} 
     CREATE (n)-[d:DIRECTED]->(t)
